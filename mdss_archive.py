@@ -13,6 +13,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 class keydefaultdict(collections.defaultdict):
+    """default dict but give key to function"""
     # https://stackoverflow.com/a/2912455/3936601
     def __missing__(self, key):
         if self.default_factory is None:
@@ -23,19 +24,35 @@ class keydefaultdict(collections.defaultdict):
 
 
 def dmlser(id):
-    return set(subprocess.run(
-        "mdss dmls -l {id} | awk '$8 ~ /DUL|OFL/ {print $9}'",
-        stdout=subprocess.PIPE,
-        shell=True,
-        check=True,
-        encoding='utf8',
-    ).stdout.split('\n'))
+    """get all files in path that are on tape"""
+    return set(
+        subprocess.run(
+            "mdss dmls -l " + id + " | awk '$8 ~ /DUL|OFL/ {print $9}'",
+            stdout=subprocess.PIPE,
+            shell=True,
+            check=True,
+            encoding='utf8',
+        ).stdout.split('\n')
+    )
+
+def dmls_size(id):
+    """
+    get size of one file
+    if this gets used more it needs to be cached
+    """
+    res = subprocess.run(
+            f"mdss ls -l {id}".split(),
+            stdout=subprocess.PIPE,
+            check=True,
+            encoding='utf8',
+        ).stdout.strip().split('\n')
+    assert len(res) == 1, res
+    return int(res[0].split()[4])
 
 
-def dmls_ontape(path, file, cache=keydefaultdict(dmlser)):
-    return file in cache[path]
-
-
+def dmls_ontape(path, cache=keydefaultdict(dmlser)):
+    """is path on tape? cached"""
+    return os.path.basename(path) in cache[os.path.dirname(path)]
 
 
 class Job(object):
@@ -44,10 +61,11 @@ class Job(object):
     """
 
     def __init__(self, code, file):
-        assert Path(file).exists()
         self.file = file
-        self.dest = f"{MDSS_DIR}/{code[0:2]}/{code[2:4]}"
+        self.dest = f"{MDSS_DIR}/{code[0:2]}/{code[2:4]}/{os.path.basename(self.file)}"
         self.tape_done = Path(f"{self.file}.tape.done")
+
+        assert Path(file).exists() or self.tape_done.exists()
 
         self.add_job(
             'put',
@@ -57,9 +75,7 @@ class Job(object):
                 "-l",
                 "wd",
                 "-v",
-                f"FILESOURCE={file}",
-                "-v",
-                f"DESTINATION={self.dest}"
+                f"FILESOURCE={file},DESTINATION={self.dest}",
             ],
             [],
         )
@@ -70,13 +86,15 @@ class Job(object):
         vars(self)[job_name + '_done'] = Path(f"{self.file}.{job_name}.done")
 
         def start_job():
-            # print(script)
+            vars(self)[job_name].touch()
             job_jid = subprocess.run(
-                ['qsub'] + qargs + job_script,
+                ['qsub'] + qargs + [job_script],
                 stdout=subprocess.PIPE,
                 check=True,
                 encoding="utf8",
-            ).stdout().strip()
+                cwd=os.path.join(HERE,
+                                 'logs'),
+            ).stdout.strip()
             print(job_name, job_jid, self.file)
             vars(self)[job_name].write_text(job_jid)
             return job_jid
@@ -84,7 +102,12 @@ class Job(object):
         vars(self)['start_' + job_name] = start_job
 
     def check_tape(self):
-        return dmls_ontape(self.dest, os.path.basename(self.file))
+        # weird logic, dont want to check size until it is on tape
+        # and then only once, to make sure we dont spam the system.
+        if dmls_ontape(self.dest):
+            assert dmls_size(self.dest) == Path(self.file).stat().st_size
+            return True
+        return False
 
 
 def count_jobs():
@@ -99,6 +122,10 @@ def count_jobs():
 
 
 def main(args):
+    """
+    it is probably better to put bunches of files in together,
+    or even whole directories
+    """
     put_running = count_jobs()
 
     for l in args.infile:
@@ -110,10 +137,10 @@ def main(args):
             put_running += 1
             job.start_put()
         elif job.put_done.exists() and not job.tape_done.exists():
-            # todo check file size at least!
             if job.check_tape():
                 job.tape_done.touch()
-
+                print('tape', job.dest)
+                Path(job.file).unlink()
 
 
 if __name__ == '__main__':

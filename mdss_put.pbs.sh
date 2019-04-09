@@ -10,4 +10,4 @@ set -x
 
 mdss mkdir "$(dirname "$DESTINATION")"
 mdss -P wq2 put "$FILESOURCE" "$DESTINATION"
-touch "$FILESOURCE".put
+touch "$FILESOURCE".put.done
