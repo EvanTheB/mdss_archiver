@@ -14,6 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 class keydefaultdict(collections.defaultdict):
     """default dict but give key to function"""
+
     # https://stackoverflow.com/a/2912455/3936601
     def __missing__(self, key):
         if self.default_factory is None:
@@ -23,11 +24,11 @@ class keydefaultdict(collections.defaultdict):
             return ret
 
 
-def dmlser(id):
-    """get all files in path that are on tape"""
+def dmlser(path):
+    """get all files in path (a directory) that are on tape"""
     return set(
         subprocess.run(
-            "mdss dmls -l " + id + " | awk '$8 ~ /DUL|OFL/ {print $9}'",
+            "mdss dmls -l " + path + " | awk '$8 ~ /DUL|OFL/ {print $9}'",
             stdout=subprocess.PIPE,
             shell=True,
             check=True,
@@ -35,17 +36,18 @@ def dmlser(id):
         ).stdout.split('\n')
     )
 
-def dmls_size(id):
+
+def dmls_size(path):
     """
     get size of one file
     if this gets used more it needs to be cached
     """
     res = subprocess.run(
-            f"mdss ls -l {id}".split(),
-            stdout=subprocess.PIPE,
-            check=True,
-            encoding='utf8',
-        ).stdout.strip().split('\n')
+        f"mdss ls -l {path}".split(),
+        stdout=subprocess.PIPE,
+        check=True,
+        encoding='utf8',
+    ).stdout.strip().split('\n')
     assert len(res) == 1, res
     return int(res[0].split()[4])
 
