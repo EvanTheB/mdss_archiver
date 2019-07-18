@@ -1,4 +1,9 @@
 #!/bin/bash
+# mdss put a file into project:destination
+# the mdss file commands are gimped so we cannot
+# do this correctly.
+# (eg atomically and without directory ambiguity)
+# we put to a .part file and mv into position
 
 set -euo pipefail
 set -x
@@ -31,8 +36,23 @@ PROJECT="$3"
 # because we are qsubbing `exec bash` we don't get
 # any /opt/bin/nfsh or .rc stuff including path to mdss
 # this doesn't seem to matter to mdss otherwise.
+
+# mdss mkdir succeeds if exists
 /opt/bin/mdss -P "$PROJECT" mkdir "$(dirname "$DESTINATION")"
-/opt/bin/mdss -P "$PROJECT" put "$FILESOURCE" "$DESTINATION"
+
+# there is no ln or mv -n, so we have no atomic way to do this
+
+# if ls has a different error, we cannot detect it
+if /opt/bin/mdss -P "$PROJECT" ls "$DESTINATION"; then
+    logger fail: file already exists
+    exit 1
+fi
+if /opt/bin/mdss -P "$PROJECT" ls "$DESTINATION".part; then
+    logger fail: part file already exists
+    exit 1
+fi
+/opt/bin/mdss -P "$PROJECT" put "$FILESOURCE" "$DESTINATION".part
+/opt/bin/mdss -P "$PROJECT" mv "$DESTINATION".part "$DESTINATION"
 
 touch "$bme.ok"
 
