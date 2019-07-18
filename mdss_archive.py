@@ -3,13 +3,13 @@
 import argparse
 import sys
 import os
+import shutil
 import subprocess
 import functools
 from pathlib import Path
 import collections
-MDSS_DIR = "results/crams"
-PROJECT = "wq2"
-HERE = os.path.dirname(os.path.abspath(__file__))
+import functools
+HERE = Path(os.path.dirname(os.path.abspath(__file__)))
 
 
 class keydefaultdict(collections.defaultdict):
@@ -24,26 +24,27 @@ class keydefaultdict(collections.defaultdict):
             return ret
 
 
-def dmlser(path):
+@functools.lru_cache(maxsize=100_000)
+def dmlser(path, project):
     """get all files in path (a directory) that are on tape"""
     return set(
+        l.split()[8] for l in
         subprocess.run(
-            "mdss dmls -l " + path + " | awk '$8 ~ /DUL|OFL/ {print $9}'",
+            f"mdss -P {project} dmls -l".split() + [path],
             stdout=subprocess.PIPE,
-            shell=True,
             check=True,
             encoding='utf8',
-        ).stdout.split('\n')
+        ).stdout.split('\n')[1:-1] if l.split()[7] in ['(DUL)', '(OFL)']
     )
 
 
-def dmls_size(path):
+def dmls_size(path, project):
     """
     get size of one file
     if this gets used more it needs to be cached
     """
     res = subprocess.run(
-        f"mdss ls -l {path}".split(),
+        f"mdss -P {project} ls -l".split() + [path],
         stdout=subprocess.PIPE,
         check=True,
         encoding='utf8',
@@ -52,9 +53,9 @@ def dmls_size(path):
     return int(res[0].split()[4])
 
 
-def dmls_ontape(path, cache=keydefaultdict(dmlser)):
+def dmls_ontape(path, project):
     """is path on tape? cached"""
-    return os.path.basename(path) in cache[os.path.dirname(path)]
+    return os.path.basename(path) in dmlser(os.path.dirname(path), project)
 
 
 class Job(object):
@@ -62,65 +63,133 @@ class Job(object):
         Just a handy state store.
     """
 
-    def __init__(self, code, file):
-        self.file = file
-        self.dest = f"{MDSS_DIR}/{code[0:2]}/{code[2:4]}/{os.path.basename(self.file)}"
-        self.tape_done = Path(f"{self.file}.tape.done")
+    def __init__(self, file, dest, project):
+        self.file = Path(file)
+        self.dest = dest
+        self.project = project
 
-        assert Path(file).exists() or self.tape_done.exists()
+        self.workdir = HERE / "run" / self.file.name
 
-        self.add_job(
-            'put',
+        self.mdss_put = self.Step(
+            'mdss_put',
             os.path.join(HERE,
                          'mdss_put.pbs.sh'),
             [
+                "-q",
+                "copyq",
+                "-P",
+                "gd7", #project,
                 "-l",
                 "wd",
-                "-v",
-                f"FILESOURCE={file},DESTINATION={self.dest}",
+                "-l",
+                "mem=2GB",
+                "-l",
+                "walltime=10:00:00",
+                "-l",
+                "other=gdata2:gdata3:mdss",
             ],
-            [],
+            [file, dest, project],
+            self.workdir,
         )
 
-    def add_job(self, job_name, job_script, qargs, jargs):
-        assert len(jargs) == 0
-        vars(self)[job_name] = Path(f"{self.file}.{job_name}")
-        vars(self)[job_name + '_done'] = Path(f"{self.file}.{job_name}.done")
+    class Step(object):
+        """
+        A job_script is run in jobdir/jobname
+        When the job jid is gone from qstat the file {job_script}.ok
+        indicates success. This Class stores state in jobdir in files
+        job_name.start and job_name.end.
+        """
 
-        def start_job():
-            vars(self)[job_name].touch()
-            job_jid = subprocess.run(
-                ['qsub'] + qargs + [job_script],
-                stdout=subprocess.PIPE,
-                check=True,
-                encoding="utf8",
-                cwd=os.path.join(HERE,
-                                 'logs'),
-            ).stdout.strip()
-            print(job_name, job_jid, self.file)
-            vars(self)[job_name].write_text(job_jid)
-            return job_jid
+        def __init__(self, job_name, job_script, qargs, jargs, jobdir):
+            self.job_name = job_name
+            self.job_script = job_script
+            self.qargs = qargs
+            self.jargs = jargs
+            self.jobdir = jobdir
+            self.workdir = self.jobdir / job_name
+            self.warn_fail = False
 
-        vars(self)['start_' + job_name] = start_job
+            self.started_file = self.jobdir / f"{job_name}.start"
+            self.done_file = self.jobdir / f"{job_name}.done"
+
+        def started(self):
+            return self.started_file.exists()
+
+        def done(self):
+            if self.started() and not self.done_file.exists():
+                jid = self.started_file.read_text().strip()
+                if jid not in qstat_jids:
+                    if (
+                        self.workdir
+                        / (os.path.basename(self.job_script) + ".ok")
+                    ).exists():
+                        # todo check for actually complete here
+                        self.done_file.touch()
+                    elif not self.warn_fail:
+                        self.warn_fail = True
+                        print(
+                            "warn, job failed?",
+                            self.job_name,
+                            self.workdir,
+                            jid,
+                            file=sys.stderr,
+                        )
+            return self.done_file.exists()
+
+        def start(self):
+            # (and check if done)
+            # return True if started
+
+            if self.done():
+                return False
+
+            if not self.started():
+                self.workdir.mkdir(parents=True, exist_ok=True)
+                self.started_file.touch()
+                shutil.copy(self.job_script, self.workdir)
+                job_jid = subprocess.run(
+                    [
+                        "qsub",
+                        "-N",
+                        self.job_name,
+                        "-e",
+                        "stderr",
+                        "-o",
+                        "stdout",
+                        "-l"
+                        "wd",
+                    ]
+                    + self.qargs
+                    + ["--", "bash", os.path.basename(self.job_script)]
+                    + self.jargs,
+                    cwd=self.workdir,
+                    stdout=subprocess.PIPE,
+                    check=True,
+                    encoding="utf8",
+                ).stdout.strip()
+                self.started_file.write_text(job_jid + '\n')
+                qstat_jids.add(job_jid)
+                print(self.job_name, self.workdir, job_jid)
+                return True
+
+            return False
 
     def check_tape(self):
         # weird logic, dont want to check size until it is on tape
         # and then only once, to make sure we dont spam the system.
-        if dmls_ontape(self.dest):
-            assert dmls_size(self.dest) == Path(self.file).stat().st_size
+        if dmls_ontape(self.dest, self.project):
+            assert dmls_size(self.dest, self.project) == Path(self.file).stat().st_size
             return True
         return False
 
-
 def count_jobs():
-    return int(
-        subprocess.run(
-            "qstat -u eb8858 | grep -c copyq || true",
-            shell="/bin/bash",
+    j = subprocess.run(
+            "qstat -u eb8858".split(),
             stdout=subprocess.PIPE,
-            check=True
-        ).stdout
-    )
+            check=True,
+            encoding="utf8",
+        )
+    return set(l.strip().split()[0] for l in j.stdout.split('\n') if "mdss_put" in l)
 
 
 def main(args):
@@ -128,31 +197,51 @@ def main(args):
     it is probably better to put bunches of files in together,
     or even whole directories
     """
-    put_running = count_jobs()
+    put_running = len(qstat_jids)
 
-    for l in args.infile:
-        job = l.strip().split('\t')
-        assert len(job) == 1
-        job = Job(os.path.basename(job[0])[0:5], job[0])
+    jobs_raw = [l.strip().split('\t') for l in args.infile]
+    assert all(len(j) == 3 for j in jobs_raw)
+    assert not any(any(' ' in a for a in j) for j in jobs_raw)
 
-        if not job.put.exists() and put_running < args.put_lim:
-            put_running += 1
-            job.start_put()
-        elif job.put_done.exists() and not job.tape_done.exists():
-            if job.check_tape():
-                job.tape_done.touch()
-                print('tape', job.dest)
-                Path(job.file).unlink()
+    jobs = [Job(*job) for job in jobs_raw]
+
+    for job in jobs:
+        assert job.file.exists()
+        if put_running >= args.put_lim:
+            break
+        put_running += job.mdss_put.start()
+
+    for job in jobs:
+        if job.mdss_put.done():
+            tape_done = Path(str(job.file) + ".mdssok")
+            if not tape_done.exists():
+                if job.check_tape():
+                    print("done:", job.file)
+                    tape_done.write_text(job.dest + '\n')
+                    # job.file.unlink()
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='')
+    parser = argparse.ArgumentParser(
+        description="""read jobs (tsv) from {infile}.
+        `filename destination project`
+        eg: `/g/data/wq2/crams/AAAAA.cram results/cram/AAAAA.cram wq2`
+        First a copyq mdss put job will be launched.
+        Then we will wait and confirm the file is on tape and actual size.
+        Finally a file will be added `{filename}.mdssok`
+        and the original will be deleted.
+        Progress and copyq runs are tracked in the PWD."""
+    )
     parser.add_argument(
         'infile',
         type=open,
         help='infile',
         default=sys.stdin,
         nargs='?'
+    )
+    parser.add_argument(
+        '--verbose', "-v",
+        action="store_true",
     )
 
     def add(lim, default=1):
@@ -167,4 +256,12 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    if args.verbose:
+        real_run = subprocess.run
+        def verbose_run(*args, **kwargs):
+            print(args, kwargs, file=sys.stderr)
+            return real_run(*args, **kwargs)
+        subprocess.run = verbose_run
+
+    qstat_jids = count_jobs()
     sys.exit(main(args))
