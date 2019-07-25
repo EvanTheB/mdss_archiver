@@ -65,6 +65,7 @@ class Job(object):
 
     def __init__(self, file, dest, project):
         self.file = Path(file)
+        self.file_mdss_done = Path(str(self.file) + ".mdssok")
         self.dest = dest
         self.project = project
 
@@ -206,19 +207,17 @@ def main(args):
     jobs = [Job(*job) for job in jobs_raw]
 
     for job in jobs:
-        assert job.file.exists()
-        if put_running >= args.put_lim:
-            break
-        put_running += job.mdss_put.start()
+        assert job.file.exists() or job.file_mdss_done.exists()
+        if put_running < args.put_lim:
+            put_running += job.mdss_put.start()
 
     for job in jobs:
         if job.mdss_put.done():
-            tape_done = Path(str(job.file) + ".mdssok")
-            if not tape_done.exists():
+            if not job.file_mdss_done.exists():
                 if job.check_tape():
                     print("done:", job.file)
-                    tape_done.write_text(job.dest + '\n')
-                    # job.file.unlink()
+                    job.file_mdss_done.write_text(job.dest + '\n')
+                    job.file.unlink()
 
 
 if __name__ == '__main__':
