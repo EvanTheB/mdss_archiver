@@ -27,31 +27,21 @@ class keydefaultdict(collections.defaultdict):
 @functools.lru_cache(maxsize=100_000)
 def dmlser(path, project):
     """get all files in path (a directory) that are on tape"""
-    return set(
-        l.split()[8] for l in
+    return dict(
+        # this probably doesnt handle whitespace names correctly
+        (l.split()[8], int(l.split()[4])) for l in
         subprocess.run(
             f"mdss -P {project} dmls -l".split() + [path],
             stdout=subprocess.PIPE,
             check=True,
             encoding='utf8',
-        ).stdout.split('\n')[1:-1] if l.split()[7] in ['(DUL)', '(OFL)']
+        ).stdout.strip().split('\n')[1:]
+        if l.split()[7] in ['(DUL)', '(OFL)']
     )
 
-
 def dmls_size(path, project):
-    """
-    get size of one file
-    if this gets used more it needs to be cached
-    """
-    res = subprocess.run(
-        f"mdss -P {project} ls -l".split() + [path],
-        stdout=subprocess.PIPE,
-        check=True,
-        encoding='utf8',
-    ).stdout.strip().split('\n')
-    assert len(res) == 1, res
-    return int(res[0].split()[4])
-
+    """get size of one file (must be on tape)"""
+    return dmlser(os.path.dirname(path), project)[os.path.basename(path)]
 
 def dmls_ontape(path, project):
     """is path on tape? cached"""
