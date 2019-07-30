@@ -209,6 +209,9 @@ def main(args):
                     job.file_mdss_done.write_text(job.dest + '\n')
                     job.file.unlink()
 
+    if all(job.file_mdss_done.exists() for job in jobs):
+        print("all done", len(jobs))
+        exit(1)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
