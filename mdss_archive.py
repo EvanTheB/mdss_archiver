@@ -71,8 +71,6 @@ class Job(object):
                 "-P",
                 "gd7", #project,
                 "-l",
-                "wd",
-                "-l",
                 "mem=2GB",
                 "-l",
                 "walltime=10:00:00",
@@ -147,7 +145,7 @@ class Job(object):
                         "stderr",
                         "-o",
                         "stdout",
-                        "-l"
+                        "-l",
                         "wd",
                     ]
                     + self.qargs
