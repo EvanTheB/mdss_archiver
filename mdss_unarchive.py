@@ -46,8 +46,7 @@ def dmlser_disk(path, project):
         # this probably doesnt handle whitespace names correctly
         l.split()[8]
         for l in dmlser(path, project)
-        # todo add the disk only thing here
-        if l.split()[7] in ["(DUL)"]
+        if l.split()[7] in ["(DUL)", "(REG)"]
     )
 
 
