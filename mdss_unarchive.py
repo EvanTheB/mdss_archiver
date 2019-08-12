@@ -27,11 +27,9 @@ class keydefaultdict(collections.defaultdict):
 
 @functools.lru_cache(maxsize=100_000)
 def dmlser(path, project):
-    """get all files in path (a directory) that are on disk"""
-    return dict(
-        # this probably doesnt handle whitespace names correctly
-        (l.split()[8], int(l.split()[4]))
-        for l in subprocess.run(
+    """cache a dmls call (linesplit only)"""
+    return (
+        subprocess.run(
             f"mdss -P {project} dmls -l".split() + [path],
             stdout=subprocess.PIPE,
             check=True,
@@ -39,19 +37,39 @@ def dmlser(path, project):
         )
         .stdout.strip()
         .split("\n")[1:]
+    )
+
+
+@functools.lru_cache(maxsize=100_000)
+def dmlser_disk(path, project):
+    return set(
+        # this probably doesnt handle whitespace names correctly
+        l.split()[8]
+        for l in dmlser(path, project)
         # todo add the disk only thing here
         if l.split()[7] in ["(DUL)"]
     )
 
 
+@functools.lru_cache(maxsize=100_000)
+def dmlser_size(path, project):
+    return dict(
+        # this probably doesnt handle whitespace names correctly
+        (l.split()[8], int(l.split()[4]))
+        for l in dmlser(path, project)
+    )
+
+
 def dmls_size(path, project):
     """get size of one file"""
-    return dmlser(os.path.dirname(path), project)[os.path.basename(path)]
+    return dmlser_size(os.path.dirname(path), project)[os.path.basename(path)]
 
 
 def dmls_ondisk(path, project):
     """is path on disk? cached"""
-    return os.path.basename(path) in dmlser(os.path.dirname(path), project)
+    return os.path.basename(path) in dmlser_disk(
+        os.path.dirname(path), project
+    )
 
 
 class Job(object):
