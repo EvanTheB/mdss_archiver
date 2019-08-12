@@ -244,13 +244,17 @@ def main(args):
                         job.mdss_file, job.mdss_project
                     )
 
-    for proj, files in staging.items():
-        subprocess.run(
-            f"xargs -r0 mdss -P {proj} stage".split(),
-            check=True,
-            input="\0".join(files),
-            encoding="utf8",
-        )
+    # only stage more if our copyq is not full
+    # this makes it a bit slower - but nicer behaviour.
+    if get_running >= args.get_lim:
+        for proj, files in staging.items():
+            print("staging", proj)
+            subprocess.run(
+                f"xargs -r0 mdss -P {proj} stage".split(),
+                check=True,
+                input="\0".join(files),
+                encoding="utf8",
+            )
 
 
 if __name__ == "__main__":
