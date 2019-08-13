@@ -225,6 +225,9 @@ def main(args):
         if job.mdss_get.done():
             assert os.path.exists(job.gdata_file)
 
+    if all(job.mdss_get.done() for job in jobs):
+        exit(1)
+
     staging = collections.defaultdict(list)
     staging_total_filesize = 0
     for job in jobs:
@@ -245,7 +248,7 @@ def main(args):
 
     # only stage more if our copyq is not full
     # this makes it a bit slower - but nicer behaviour.
-    if get_running >= args.get_lim:
+    if get_running < args.get_lim:
         for proj, files in staging.items():
             print("staging", proj)
             subprocess.run(
