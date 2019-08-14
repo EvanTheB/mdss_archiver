@@ -1,12 +1,12 @@
 Scripts for controlling mdss put / get on NCI.
 
-Generally these scripts take a tab separated list of files to archive.
+Generally these scripts take a list of files to archive, with tab separated controls.
 The script should be re-run on a timer, probably via ssh, until all files are done.
 This is not perfect. There are still some hard coded parts.
 Probably more errors to be dealt with. Use with caution.
 
 There are facilities for limiting the number of concurrent jobs,
-and eventually I hope to add total disk usage sizes as well.
+and eventually I hope to add total disk usage limits as well.
 
 The put script tries to wait until the file is really on tape.
 I also made an attempt to make files appear in their final location atomically (with a ln or mv into place). But it is not fully possible.

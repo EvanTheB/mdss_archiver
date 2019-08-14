@@ -228,7 +228,9 @@ def main(args):
     if all(job.mdss_get.done() for job in jobs):
         exit(1)
 
+    # files to stage {proj: [path,]}
     staging = collections.defaultdict(list)
+    # accumulate staging filesize to allow a limit
     staging_total_filesize = 0
     for job in jobs:
         if not job.mdss_get.started():

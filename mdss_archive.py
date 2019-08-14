@@ -205,7 +205,8 @@ def main(args):
                 if job.check_tape():
                     print("done:", job.file)
                     job.file_mdss_done.write_text(job.dest + '\n')
-                    job.file.unlink()
+                    if args.rm:
+                        job.file.unlink()
 
     if all(job.file_mdss_done.exists() for job in jobs):
         print("all done", len(jobs))
@@ -243,6 +244,11 @@ if __name__ == '__main__':
         )
 
     add('put')
+    parser.add_argument(
+        "--rm",
+        help='unlink files after they are on tape',
+        action='store_true'
+    )
 
     args = parser.parse_args()
 
