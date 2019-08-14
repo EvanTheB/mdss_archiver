@@ -8,9 +8,22 @@ Probably more errors to be dealt with. Use with caution.
 There are facilities for limiting the number of concurrent jobs,
 and eventually I hope to add total disk usage limits as well.
 
-The put script tries to wait until the file is really on tape.
-I also made an attempt to make files appear in their final location atomically (with a ln or mv into place). But it is not fully possible.
+archive // put
 
+    The put script tries to wait until the file is really on tape.
+    I also made an attempt to make files appear in their final location atomically (with a ln or mv into place). But it is not fully possible.
+
+    archive like this, 10 copyq job limit and delete gdata files after:
+
+    while ssh eb8858@raijin.nci.org.au cd /g/data/mz4/evaben_cram_mdss \; python3 mdss_archive.py --put 10 files_20190730; do sleep 5m; done; alert
+
+unarchive // get
+
+    The get script tries to 'get' files after they are already on disk, and tries not to stage files unnecessarily.
+
+    unarchive like this, 10 copyq job limit and 1TB 'stage' limit:
+
+    while ssh eb8858@raijin.nci.org.au cd /g/data/wq2/users/eb8858/isks/unarchiver \; python3 mdss_unarchive.py isks_mdss.unarchive --get-lim 10 --staging-lim 1000_000_000_000; do sleep 5m; done; alert
 
 
 MDSS dmls states (probably similar at NCI):
