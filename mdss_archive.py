@@ -1,6 +1,7 @@
 #!/usr/bin/env python36
 
 import argparse
+import getpass
 import sys
 import os
 import shutil
@@ -9,6 +10,7 @@ import functools
 from pathlib import Path
 import collections
 import functools
+
 HERE = Path(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -29,19 +31,23 @@ def dmlser(path, project):
     """get all files in path (a directory) that are on tape"""
     return dict(
         # this probably doesnt handle whitespace names correctly
-        (l.split()[8], int(l.split()[4])) for l in
-        subprocess.run(
+        (l.split()[8], int(l.split()[4]))
+        for l in subprocess.run(
             f"mdss -P {project} dmls -l".split() + [path],
             stdout=subprocess.PIPE,
             check=True,
-            encoding='utf8',
-        ).stdout.strip().split('\n')[1:]
-        if l.split()[7] in ['(DUL)', '(OFL)']
+            encoding="utf8",
+        )
+        .stdout.strip()
+        .split("\n")[1:]
+        if l.split()[7] in ["(DUL)", "(OFL)"]
     )
+
 
 def dmls_size(path, project):
     """get size of one file (must be on tape)"""
     return dmlser(os.path.dirname(path), project)[os.path.basename(path)]
+
 
 def dmls_ontape(path, project):
     """is path on tape? cached"""
@@ -62,14 +68,13 @@ class Job(object):
         self.workdir = HERE / "run" / self.file.name
 
         self.mdss_put = self.Step(
-            'mdss_put',
-            os.path.join(HERE,
-                         'mdss_put.pbs.sh'),
+            "mdss_put",
+            os.path.join(HERE, "mdss_put.pbs.sh"),
             [
                 "-q",
                 "copyq",
                 "-P",
-                "gd7", #project,
+                "gd7",  # project,
                 "-l",
                 "mem=2GB",
                 "-l",
@@ -156,7 +161,7 @@ class Job(object):
                     check=True,
                     encoding="utf8",
                 ).stdout.strip()
-                self.started_file.write_text(job_jid + '\n')
+                self.started_file.write_text(job_jid + "\n")
                 qstat_jids.add(job_jid)
                 print(self.job_name, self.workdir, job_jid)
                 return True
@@ -167,18 +172,24 @@ class Job(object):
         # weird logic, dont want to check size until it is on tape
         # and then only once, to make sure we dont spam the system.
         if dmls_ontape(self.dest, self.project):
-            assert dmls_size(self.dest, self.project) == Path(self.file).stat().st_size
+            assert (
+                dmls_size(self.dest, self.project)
+                == Path(self.file).stat().st_size
+            )
             return True
         return False
 
+
 def count_jobs():
     j = subprocess.run(
-            "qstat -u eb8858".split(),
-            stdout=subprocess.PIPE,
-            check=True,
-            encoding="utf8",
-        )
-    return set(l.strip().split()[0] for l in j.stdout.split('\n') if "mdss_put" in l)
+        ["qstat", "-u", getpass.getuser()],
+        stdout=subprocess.PIPE,
+        check=True,
+        encoding="utf8",
+    )
+    return set(
+        l.strip().split()[0] for l in j.stdout.split("\n") if "mdss_put" in l
+    )
 
 
 def main(args):
@@ -188,9 +199,9 @@ def main(args):
     """
     put_running = len(qstat_jids)
 
-    jobs_raw = [l.strip().split('\t') for l in args.infile]
+    jobs_raw = [l.strip().split("\t") for l in args.infile]
     assert all(len(j) == 3 for j in jobs_raw)
-    assert not any(any(' ' in a for a in j) for j in jobs_raw)
+    assert not any(any(" " in a for a in j) for j in jobs_raw)
 
     jobs = [Job(*job) for job in jobs_raw]
 
@@ -204,7 +215,7 @@ def main(args):
             if not job.file_mdss_done.exists():
                 if job.check_tape():
                     print("done:", job.file)
-                    job.file_mdss_done.write_text(job.dest + '\n')
+                    job.file_mdss_done.write_text(job.dest + "\n")
                     if args.rm:
                         job.file.unlink()
 
@@ -212,7 +223,8 @@ def main(args):
         print("all done", len(jobs))
         exit(1)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="""read jobs (tsv) from {infile}.
         `filename destination project`
@@ -224,39 +236,29 @@ if __name__ == '__main__':
         Progress and copyq runs are tracked in the PWD."""
     )
     parser.add_argument(
-        'infile',
-        type=open,
-        help='infile',
-        default=sys.stdin,
-        nargs='?'
+        "infile", type=open, help="infile", default=sys.stdin, nargs="?"
     )
-    parser.add_argument(
-        '--verbose', "-v",
-        action="store_true",
-    )
+    parser.add_argument("--verbose", "-v", action="store_true")
 
     def add(lim, default=1):
         parser.add_argument(
-            f'--{lim}-lim',
-            type=int,
-            help='{lim} limit',
-            default=default
+            f"--{lim}-lim", type=int, help="{lim} limit", default=default
         )
 
-    add('put')
+    add("put")
     parser.add_argument(
-        "--rm",
-        help='unlink files after they are on tape',
-        action='store_true'
+        "--rm", help="unlink files after they are on tape", action="store_true"
     )
 
     args = parser.parse_args()
 
     if args.verbose:
         real_run = subprocess.run
+
         def verbose_run(*args, **kwargs):
             print(args, kwargs, file=sys.stderr)
             return real_run(*args, **kwargs)
+
         subprocess.run = verbose_run
 
     qstat_jids = count_jobs()
